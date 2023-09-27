@@ -1,14 +1,5 @@
 package com.yworks.yguard;
 
-import com.yworks.util.CollectionFilter;
-import com.yworks.common.ant.ZipScannerTool;
-import com.yworks.yguard.ant.ClassSection;
-import com.yworks.yguard.ant.ExposeSection;
-import com.yworks.yguard.ant.FieldSection;
-import com.yworks.yguard.ant.MapParser;
-import com.yworks.yguard.ant.Mappable;
-import com.yworks.yguard.ant.MethodSection;
-import com.yworks.yguard.ant.PackageSection;
 import com.yworks.common.ShrinkBag;
 import com.yworks.common.ant.AttributesSection;
 import com.yworks.common.ant.EntryPointsSection;
@@ -16,6 +7,17 @@ import com.yworks.common.ant.Exclude;
 import com.yworks.common.ant.InOutPair;
 import com.yworks.common.ant.TypePatternSet;
 import com.yworks.common.ant.YGuardBaseTask;
+import com.yworks.common.ant.ZipScannerTool;
+import com.yworks.util.CollectionFilter;
+import com.yworks.util.Version;
+import com.yworks.yguard.ant.ClassSection;
+import com.yworks.yguard.ant.ExposeSection;
+import com.yworks.yguard.ant.FieldSection;
+import com.yworks.yguard.ant.MapParser;
+import com.yworks.yguard.ant.Mappable;
+import com.yworks.yguard.ant.MethodSection;
+import com.yworks.yguard.ant.PackageSection;
+import com.yworks.yguard.ant.SignSection;
 import com.yworks.yguard.obf.Cl;
 import com.yworks.yguard.obf.Cl.ClassResolver;
 import com.yworks.yguard.obf.ClassTree;
@@ -26,7 +28,6 @@ import com.yworks.yguard.obf.NameMaker;
 import com.yworks.yguard.obf.NameMakerFactory;
 import com.yworks.yguard.obf.NoSuchMappingException;
 import com.yworks.yguard.obf.ResourceHandler;
-import com.yworks.util.Version;
 import com.yworks.yguard.obf.YGuardRule;
 import com.yworks.yguard.obf.classfile.LineNumberInfo;
 import com.yworks.yguard.obf.classfile.LineNumberTableAttrInfo;
@@ -100,6 +101,7 @@ public class ObfuscatorTask extends YGuardBaseTask
   private File logFile = new File("yguardlog.xml");
   protected ExposeSection expose = null;
   protected List<AdjustSection> adjustSections = new ArrayList<AdjustSection>();
+  protected SignSection signSection;
   protected MapSection map = null;
   protected PatchSection patch = null;
   //private Path resourceClassPath;
@@ -497,7 +499,7 @@ public class ObfuscatorTask extends YGuardBaseTask
     private static final int REPLACE_NAME = 8;
     private static final int REPLACE_PATH = 16;
     private static final int REPLACE_PATH_POLICY = 32;
-    
+
     private boolean replaceName = false;
     private boolean replacePath = true;
     private ReplacePathPolicy replacePathPolicy;
@@ -859,6 +861,15 @@ public class ObfuscatorTask extends YGuardBaseTask
     }
   }
 
+  public SignSection createSign() {
+    signSection = newSignSection();
+    return signSection;
+  }
+
+  protected SignSection newSignSection() {
+    return new SignSection();
+  }
+
   /**
    * Used by ant to handle the nested <code>adjust</code> element.
    *
@@ -1204,6 +1215,10 @@ public class ObfuscatorTask extends YGuardBaseTask
           }
           filter = new ClassFileFilter(new CollectionFilter(names));
         }
+        if(signSection != null) {
+          signSection.createEntries(inFilesList, getProject());
+        }
+
         GuardDB db = newGuardDB(inFiles);
 
         if (properties.containsKey("digests")) {
@@ -1218,6 +1233,7 @@ public class ObfuscatorTask extends YGuardBaseTask
         if (annotationClass != null) db.setAnnotationClass(toNativeClass(annotationClass));
 
         db.setResourceHandler(newResourceAdjuster(db));
+        db.setSignSection(signSection);
         db.setPedantic(pedantic);
         db.setReplaceClassNameStrings(replaceClassNameStrings);
         db.addListener(listener);

@@ -15,6 +15,7 @@ import com.yworks.util.abstractjar.Factory;
 import com.yworks.yguard.Conversion;
 import com.yworks.yguard.ObfuscationListener;
 import com.yworks.yguard.ParseException;
+import com.yworks.yguard.ant.SignSection;
 import com.yworks.yguard.obf.classfile.ClassConstants;
 import com.yworks.yguard.obf.classfile.ClassFile;
 
@@ -86,6 +87,8 @@ public class GuardDB implements ClassConstants
   private ResourceHandler resourceHandler;
   private String[] digestStrings;
 
+  private SignSection signSection;
+
   // Has the mapping been generated already?
 
   // Class Methods ---------------------------------------------------------
@@ -119,6 +122,10 @@ public class GuardDB implements ClassConstants
   public void setResourceHandler(ResourceHandler handler)
   {
     resourceHandler = handler;
+  }
+
+  public void setSignSection( final SignSection signSection ) {
+    this.signSection = signSection;
   }
 
   /**
@@ -396,10 +403,14 @@ public class GuardDB implements ClassConstants
               // Dump the classfile, while creating the digests
               cf.write(classOutputStream);
               classOutputStream.flush();
-              jarEntries.add(new Object[]{outEntry, baos.toByteArray()});
+              Object[] entry = {outEntry, baos.toByteArray()};
+              jarEntries.add(entry);
               baos.reset();
               // Now update the manifest entry for the class with new name and new digests
               updateManifest(i, inName, outName, digests);
+              if(signSection != null) {
+                signSection.sign(inName, outName, (byte[]) entry[1]);
+              }
             }
           }
           else if (STREAM_NAME_MANIFEST.equals(inName.toUpperCase()) ||
@@ -511,7 +522,10 @@ public class GuardDB implements ClassConstants
           // write the entry itself
           outJar.addFile(entry.getName(), (byte[]) array[1]);
         }
-
+        //对符合的jar增加签名
+        if(signSection != null && signSection.matches(inJar[i])) {
+          signSection.sign(outJar);
+        }
       }
       catch (Exception e)
       {
@@ -697,7 +711,7 @@ public class GuardDB implements ClassConstants
     classTree.setPedantic(isPedantic());
     classTree.setReplaceClassNameStrings(replaceClassNameStrings);
     ClassFile.resetDangerHeader();
-    
+
     Map parsedClasses = new HashMap();
     for(int i = 0; i < inJar.length; i++)
     {
@@ -749,7 +763,7 @@ public class GuardDB implements ClassConstants
               } else {
                 if (pedantic){
                   throw new IOException(warning + "\nMake sure these files are of the same version!");
-                } 
+                }
               }
             } else {
               parsedClasses.put(key, new Object[]{new Integer(i), name});
