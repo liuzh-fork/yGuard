@@ -14,6 +14,7 @@ import com.yworks.util.abstractjar.Entry;
 import com.yworks.util.abstractjar.Factory;
 import com.yworks.yguard.Conversion;
 import com.yworks.yguard.ObfuscationListener;
+import com.yworks.yguard.ObfuscatorTask;
 import com.yworks.yguard.ParseException;
 import com.yworks.yguard.obf.classfile.ClassConstants;
 import com.yworks.yguard.obf.classfile.ClassFile;
@@ -85,6 +86,12 @@ public class GuardDB implements ClassConstants
 
   private ResourceHandler resourceHandler;
   private String[] digestStrings;
+
+  private ObfuscatorTask.SignSection signSection;
+
+  public void setSignSection( final ObfuscatorTask.SignSection signSection ) {
+    this.signSection = signSection;
+  }
 
   // Has the mapping been generated already?
 
@@ -396,7 +403,11 @@ public class GuardDB implements ClassConstants
               // Dump the classfile, while creating the digests
               cf.write(classOutputStream);
               classOutputStream.flush();
-              jarEntries.add(new Object[]{outEntry, baos.toByteArray()});
+              Object[] objects = {outEntry, baos.toByteArray()};
+              jarEntries.add(objects);
+              if(signSection != null && signSection.contains(inName.substring(0, inName.length() - 6))) {
+                signSection.addBytes((byte[]) objects[1]);
+              }
               baos.reset();
               // Now update the manifest entry for the class with new name and new digests
               updateManifest(i, inName, outName, digests);
@@ -511,7 +522,9 @@ public class GuardDB implements ClassConstants
           // write the entry itself
           outJar.addFile(entry.getName(), (byte[]) array[1]);
         }
-
+        if(signSection != null && signSection.getJar().equals(out[i])) {
+          outJar.addFile(signSection.getName(), signSection.sign());
+        }
       }
       catch (Exception e)
       {

@@ -30,6 +30,7 @@ dependencies {
     implementation project(':annotation')
     implementation 'org.ow2.asm:asm:9.2'
     implementation 'org.apache.ant:ant:1.10.12'
+    implementation 'cn.hutool:hutool-all:5.7.22'
     testImplementation 'junit:junit:4.13-beta-3'
 }
 
@@ -113,6 +114,7 @@ task yguardJavaDoc(type: Jar) {
 
 publishing {
   repositories {
+    mavenLocal()
     maven {
       url 'https://oss.sonatype.org/service/local/staging/deploy/maven2'
       credentials {

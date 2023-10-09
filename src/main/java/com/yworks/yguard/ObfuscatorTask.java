@@ -1,14 +1,10 @@
 package com.yworks.yguard;
 
-import com.yworks.util.CollectionFilter;
-import com.yworks.common.ant.ZipScannerTool;
-import com.yworks.yguard.ant.ClassSection;
-import com.yworks.yguard.ant.ExposeSection;
-import com.yworks.yguard.ant.FieldSection;
-import com.yworks.yguard.ant.MapParser;
-import com.yworks.yguard.ant.Mappable;
-import com.yworks.yguard.ant.MethodSection;
-import com.yworks.yguard.ant.PackageSection;
+import cn.hutool.core.io.FileUtil;
+import cn.hutool.core.util.HexUtil;
+import cn.hutool.crypto.asymmetric.KeyType;
+import cn.hutool.crypto.asymmetric.RSA;
+import cn.hutool.crypto.digest.MD5;
 import com.yworks.common.ShrinkBag;
 import com.yworks.common.ant.AttributesSection;
 import com.yworks.common.ant.EntryPointsSection;
@@ -16,6 +12,17 @@ import com.yworks.common.ant.Exclude;
 import com.yworks.common.ant.InOutPair;
 import com.yworks.common.ant.TypePatternSet;
 import com.yworks.common.ant.YGuardBaseTask;
+import com.yworks.common.ant.ZipScannerTool;
+import com.yworks.util.CollectionFilter;
+import com.yworks.util.Version;
+import com.yworks.yguard.ant.ClassSection;
+import com.yworks.yguard.ant.ExposeSection;
+import com.yworks.yguard.ant.FieldSection;
+import com.yworks.yguard.ant.MapParser;
+import com.yworks.yguard.ant.Mappable;
+import com.yworks.yguard.ant.MethodSection;
+import com.yworks.yguard.ant.PackageSection;
+import com.yworks.yguard.ant.PatternMatchedClassesSection;
 import com.yworks.yguard.obf.Cl;
 import com.yworks.yguard.obf.Cl.ClassResolver;
 import com.yworks.yguard.obf.ClassTree;
@@ -26,7 +33,6 @@ import com.yworks.yguard.obf.NameMaker;
 import com.yworks.yguard.obf.NameMakerFactory;
 import com.yworks.yguard.obf.NoSuchMappingException;
 import com.yworks.yguard.obf.ResourceHandler;
-import com.yworks.util.Version;
 import com.yworks.yguard.obf.YGuardRule;
 import com.yworks.yguard.obf.classfile.LineNumberInfo;
 import com.yworks.yguard.obf.classfile.LineNumberTableAttrInfo;
@@ -64,6 +70,7 @@ import java.io.Writer;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -125,6 +132,17 @@ public class ObfuscatorTask extends YGuardBaseTask
   private File[] tempJars;
   private boolean needYShrinkModel;
   private YShrinkModel yShrinkModel;
+
+  private SignSection signSection;
+
+  public SignSection createSign() {
+    if(signSection == null) {
+      signSection = new SignSection(getProject());
+    } else {
+      throw new BuildException("Only one sign element allowed!");
+    }
+    return signSection;
+  }
 
   /**
    * Instantiates a new Obfuscator task.
@@ -486,6 +504,82 @@ public class ObfuscatorTask extends YGuardBaseTask
     }
   }
 
+  public static class SignSection extends PatternMatchedClassesSection {
+    protected Project project;
+    private Collection entries = new ArrayList( 20 );
+    private List<byte[]> bytes = new ArrayList<>(20);
+    private String name = "sign";
+    private File jar;
+
+    public File getJar() {
+      return jar;
+    }
+
+    public void setJar( final File jar ) {
+      this.jar = jar;
+    }
+
+    public void setName( final String name ) {
+      this.name = name;
+    }
+
+    public String getName() {
+      return name;
+    }
+
+    public SignSection( final Project project ) {
+      this.project = project;
+    }
+
+    @Override
+    public void addEntries( final Collection entries, final String matchedClass ) {
+      entries.add(matchedClass);
+    }
+
+    public boolean contains(String name) {
+      return entries.contains(name);
+    }
+
+    public void addBytes(byte[] bytes) {
+      this.bytes.add(bytes);
+    }
+
+    public byte[] sign() {
+      if(entries.size() != bytes.size()) {
+        throw new BuildException("Number of entries and bytes must be equal!");
+      }
+      List<String> signs = new ArrayList<>(bytes.size());
+      MD5 md5 = new MD5();
+      for (final byte[] data : bytes) {
+        signs.add(md5.digestHex(data));
+      }
+      Collections.sort(signs);
+      StringBuffer sb = new StringBuffer();
+      for (final String sign : signs) {
+        sb.append(sign);
+      }
+      return encryptHex(sb.toString()).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private String encryptHex(String str) {
+      String home = System.getProperty("user.home");
+      String privateKeyPath = home + File.separator + ".yguard" + File.separator + "license-keys.pri";
+      RSA rsa = new RSA(FileUtil.readBytes(privateKeyPath), null);
+      byte[] bytes = rsa.encrypt(str, StandardCharsets.UTF_8, KeyType.PrivateKey);
+      return HexUtil.encodeHexStr(bytes);
+    }
+
+    public Collection createEntries( Collection srcJars ) throws IOException {
+      for ( Iterator it = srcJars.iterator(); it.hasNext(); ) {
+        File file = (File) it.next();
+        ZipFileSet zipFile = new ZipFileSet();
+        zipFile.setProject(project);
+        zipFile.setSrc(file);
+        addEntries(entries, zipFile);
+      }
+      return entries;
+    }
+  }
 
   /**
    * Used by ant to handle the <code>adjust</code> element.
@@ -1161,6 +1255,9 @@ public class ObfuscatorTask extends YGuardBaseTask
       } else {
         rules = new ArrayList(20);
       }
+      if(signSection != null) {
+        signSection.createEntries(inFilesList);
+      }
 
       if (mainClass!= null)
       {
@@ -1218,6 +1315,7 @@ public class ObfuscatorTask extends YGuardBaseTask
         if (annotationClass != null) db.setAnnotationClass(toNativeClass(annotationClass));
 
         db.setResourceHandler(newResourceAdjuster(db));
+        db.setSignSection(signSection);
         db.setPedantic(pedantic);
         db.setReplaceClassNameStrings(replaceClassNameStrings);
         db.addListener(listener);
